@@ -274,8 +274,8 @@ end
 
 local function updateTimeDisplay()
     local minutesInGame = math.floor(workspace.DistributedGameTime / 60)
-    timeLabel.Text = string.format("Time: %d/5 min", minutesInGame)
-    timeLabel.TextColor3 = minutesInGame >= 4 and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(180, 180, 180)
+    timeLabel.Text = string.format("Time: %d/60 min", minutesInGame)
+    timeLabel.TextColor3 = minutesInGame >= 55 and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(180, 180, 180)
 end
 
 -- Egg selection handling
