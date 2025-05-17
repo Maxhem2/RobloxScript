@@ -546,7 +546,7 @@ local function startTimeMonitor()
                     saveSettings()
                     
                     queue_on_teleport([[
-                        loadstring(game:HttpGet("https://pastebin.com/raw/5yHqPaMd"))()
+                        loadstring(game:HttpGet("https://raw.githubusercontent.com/Maxhem2/RobloxScript/refs/heads/main/main.lua"))()
                     ]])
                     
                     TS:Teleport(game.PlaceId, Player)
