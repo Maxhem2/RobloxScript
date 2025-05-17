@@ -504,6 +504,10 @@ local function claimDailyRewards()
             RS.Msg.RemoteEvent:FireServer("领取在线奖励", i)
         end
     end
+
+    for i = 1, 3 do
+        RS.System.SystemDailyLottery.Spin:InvokeServer()
+    end
     
     task.wait(1)
     
