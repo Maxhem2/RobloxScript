@@ -235,7 +235,7 @@ local timeLabel = createInstance("TextLabel", {
     Size = UDim2.new(1, -20, 0, 15),
     Position = UDim2.new(0, 10, 1, -25),
     BackgroundTransparency = 1,
-    Text = "Time: 0/5 min",
+    Text = "Time: 0/60 min",  -- Changed from 5 to 60 minutes
     TextColor3 = Color3.fromRGB(180, 180, 180),
     Font = Enum.Font.SourceSans,
     TextSize = 12,
@@ -540,7 +540,7 @@ local function startTimeMonitor()
             updateTimeDisplay()
             
             local currentGameTime = workspace.DistributedGameTime
-            if currentGameTime >= (5 * 60 + 10) then
+            if currentGameTime >= (60 * 60 + 10) then  -- Changed from 5*60+10 to 60*60+10 (1 hour + 10 seconds)
                 if state.autoRejoinEnabled and state.scriptActive then
                     claimDailyRewards()
                     saveSettings()
