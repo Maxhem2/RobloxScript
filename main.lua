@@ -8,6 +8,11 @@ local HttpService = game:GetService("HttpService")
 Player:WaitForChild("PlayerGui")
 local char = Player.Character or Player.CharacterAdded:Wait()
 
+-- Check for existing GUI - if found, exit immediately
+if Player.PlayerGui:FindFirstChild("FarmingGUI") then
+    return
+end
+
 -- Core state variables
 local state = {
     running = false,
