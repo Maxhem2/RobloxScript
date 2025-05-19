@@ -240,7 +240,7 @@ local timeLabel = createInstance("TextLabel", {
     Size = UDim2.new(1, -20, 0, 15),
     Position = UDim2.new(0, 10, 1, -25),
     BackgroundTransparency = 1,
-    Text = "Time: 0/60 min",  -- Changed from 5 to 60 minutes
+    Text = "Time: 0/40 min",  -- Changed from 60 to 40 minutes
     TextColor3 = Color3.fromRGB(180, 180, 180),
     Font = Enum.Font.SourceSans,
     TextSize = 12,
@@ -279,8 +279,8 @@ end
 
 local function updateTimeDisplay()
     local minutesInGame = math.floor(workspace.DistributedGameTime / 60)
-    timeLabel.Text = string.format("Time: %d/60 min", minutesInGame)
-    timeLabel.TextColor3 = minutesInGame >= 55 and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(180, 180, 180)
+    timeLabel.Text = string.format("Time: %d/40 min", minutesInGame)
+    timeLabel.TextColor3 = minutesInGame >= 35 and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(180, 180, 180)
 end
 
 -- Egg selection handling
@@ -549,7 +549,7 @@ local function startTimeMonitor()
             updateTimeDisplay()
             
             local currentGameTime = workspace.DistributedGameTime
-            if currentGameTime >= (60 * 60 + 10) then  -- Changed from 5*60+10 to 60*60+10 (1 hour + 10 seconds)
+            if currentGameTime >= (40 * 60 + 10) then  -- Changed from 60*60+10 to 40*60+10 (40 minutes + 10 seconds)
                 if state.autoRejoinEnabled and state.scriptActive then
                     claimDailyRewards()
                     saveSettings()
