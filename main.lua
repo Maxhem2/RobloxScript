@@ -26,9 +26,11 @@ local state = {
     lockedEggModel = nil,
     currentSelection = nil,
     autoRejoinEnabled = false,
-    timeCheckRunning = false,
+    rewardsCheckRunning = false,
     farmHeight = 0,
-    autoFarmActive = false
+    autoFarmActive = false,
+    -- Just use savedPosition for all coordinates (including height)
+    savedPosition = nil
 }
 
 -- Settings management
@@ -38,6 +40,15 @@ local function saveSettings()
     if state.farmHeight > 0 then settings.farmHeight = state.farmHeight end
     if state.autoFarmActive then settings.autoFarmActive = true end
     if state.autoRejoinEnabled then settings.autoRejoinEnabled = true end
+    
+    -- Save position if auto rejoin is enabled
+    if state.autoRejoinEnabled and state.savedPosition then
+        settings.savedPosition = {
+            X = state.savedPosition.X,
+            Y = state.savedPosition.Y,
+            Z = state.savedPosition.Z
+        }
+    end
 
     if next(settings) then
         local settingsJson = HttpService:JSONEncode(settings)
@@ -62,6 +73,32 @@ local function loadSettings()
             state.autoRejoinEnabled = settings.autoRejoinEnabled or false
             state.farmHeight = (settings.farmHeight and settings.farmHeight > 0) and settings.farmHeight or 0
             state.autoFarmActive = settings.autoFarmActive or false
+            
+            -- Load saved position
+            if settings.savedPosition then
+                state.savedPosition = Vector3.new(
+                    settings.savedPosition.X,
+                    settings.savedPosition.Y,
+                    settings.savedPosition.Z
+                )
+                
+                -- Teleport player to saved position if found
+                task.spawn(function()
+                    local character = Player.Character or Player.CharacterAdded:Wait()
+                    local humanoidRootPart = character:WaitForChild("HumanoidRootPart", 5)
+                    
+                    if humanoidRootPart and state.savedPosition then
+                        -- Teleport the character
+                        if character.PrimaryPart then
+                            local currentCFrame = character:GetPrimaryPartCFrame()
+                            local newCFrame = CFrame.new(state.savedPosition) * CFrame.Angles(
+                                currentCFrame:ToEulerAnglesXYZ()
+                            )
+                            character:SetPrimaryPartCFrame(newCFrame)
+                        end
+                    end
+                end)
+            end
         end
     end
 end
@@ -234,19 +271,36 @@ local rejoinBtn = createButton("RejoinButton", "Auto Rejoin: OFF", UDim2.new(0.9
                               UDim2.new(0.03, 0, 0, 140), Color3.fromRGB(80, 80, 80), frame)
 rejoinBtn.TextSize = 14
 
--- Time display
-local timeLabel = createInstance("TextLabel", {
-    Name = "TimeLabel",
+-- Time until rejoin display
+local timeUntilRejoinLabel = createInstance("TextLabel", {
+    Name = "TimeUntilRejoinLabel",
     Size = UDim2.new(1, -20, 0, 15),
     Position = UDim2.new(0, 10, 1, -25),
     BackgroundTransparency = 1,
-    Text = "Time: 0/40 min",  -- Changed from 60 to 40 minutes
+    Text = "Rejoin in: Calculating...",
     TextColor3 = Color3.fromRGB(180, 180, 180),
     Font = Enum.Font.SourceSans,
     TextSize = 12,
     TextXAlignment = Enum.TextXAlignment.Left,
     Parent = frame
 })
+
+-- Helper function to format time
+local function formatTime(seconds)
+    if seconds <= 0 then
+        return "Ready!"
+    end
+    
+    local hours = math.floor(seconds / 3600)
+    local minutes = math.floor((seconds % 3600) / 60)
+    local secs = math.floor(seconds % 60)
+    
+    if hours > 0 then
+        return string.format("%02d:%02d:%02d", hours, minutes, secs)
+    else
+        return string.format("%02d:%02d", minutes, secs)
+    end
+end
 
 -- Update UI elements
 local function updateButtonStates()
@@ -277,10 +331,197 @@ local function updateButtonStates()
     rejoinBtn.Text = state.autoRejoinEnabled and "Auto Rejoin: ON" or "Auto Rejoin: OFF"
 end
 
+-- Get online rewards data
+local function getOnlineRewardsData()
+    local CfgFind = require(RS.Tool.CfgFind)
+    local onlineRewardsConf = CfgFind.GetCfgByName("onlinerewardsConf")
+    local onlineTimeObj = Player:FindFirstChild("OnlineTime")
+    
+    if not onlineTimeObj or not onlineRewardsConf then
+        return nil, nil, nil
+    end
+    
+    local onlineTime = onlineTimeObj.Value
+    
+    -- Keep trying to get player data until it exists
+    local playerData = nil
+    
+    -- Keep checking in a loop until we find the data
+    while not playerData and state.scriptActive do
+        for _, v in pairs(getgc(true)) do
+            if type(v) == "table" and v.OnlineAward ~= nil then
+                playerData = v
+                break
+            end
+        end
+        
+        if playerData then
+            break
+        end
+        
+        -- Wait a short time before trying again
+        task.wait(0.5)
+    end
+    
+    -- If script is no longer active, return nil
+    if not state.scriptActive then
+        return nil, nil, nil
+    end
+    
+    return onlineRewardsConf, onlineTime, playerData
+end
+
+-- Rewards check functionality
+local function checkOnlineRewards()
+    local onlineRewardsConf, onlineTime, playerData = getOnlineRewardsData()
+    
+    if not onlineRewardsConf or not onlineTime or not playerData then
+        return 0, 0, false, 0
+    end
+    
+    -- Count ready and claimed rewards
+    local claimedCount = 0
+    local readyCount = 0
+    local allReady = false
+    local totalRewards = 0
+    local timeUntilLastReward = 0
+    
+    -- Find the last reward index
+    local lastIndex = 0
+    for index, _ in pairs(onlineRewardsConf) do
+        if index > lastIndex then
+            lastIndex = index
+        end
+    end
+    
+    -- Calculate time until last reward and count rewards
+    for index, config in pairs(onlineRewardsConf) do
+        totalRewards = totalRewards + 1
+        local requiredTime = config.OnlinTime * 60
+        local timeLeft = requiredTime - onlineTime
+        
+        -- Check if claimed - handle nil case
+        local claimed = false
+        if playerData.OnlineAward and type(playerData.OnlineAward) == "table" then
+            claimed = (playerData.OnlineAward[index] == 1)
+        end
+        
+        if claimed then
+            claimedCount = claimedCount + 1
+        elseif timeLeft <= 0 then
+            readyCount = readyCount + 1
+        end
+        
+        -- If this is the last reward, track time until it's ready
+        if index == lastIndex then
+            timeUntilLastReward = timeLeft
+            if timeLeft <= 0 and not claimed then
+                allReady = true
+            end
+        end
+    end
+    
+    return readyCount, totalRewards, allReady, timeUntilLastReward
+end
+
+-- Claim claimable rewards function
+local function claimClaimableRewards()
+    local onlineRewardsConf, onlineTime, playerData = getOnlineRewardsData()
+    
+    if not onlineRewardsConf or not onlineTime or not playerData then
+        return
+    end
+    
+    -- Make sure OnlineAward table exists
+    if not playerData.OnlineAward or type(playerData.OnlineAward) ~= "table" then
+        return
+    end
+    
+    -- Claim each ready reward except for reward #2
+    for index, config in pairs(onlineRewardsConf) do
+        if index ~= 2 then -- Skip reward #2
+            local requiredTime = config.OnlinTime * 60
+            local timeLeft = requiredTime - onlineTime
+            local claimed = (playerData.OnlineAward[index] == 1)
+            
+            if timeLeft <= 0 and not claimed then
+                pcall(function()
+                    RS.Msg.RemoteEvent:FireServer("领取在线奖励", index)
+                end)
+
+                task.wait(1)
+
+                -- Use buff items
+                pcall(function()
+                    local StarterScripts = game:GetService("StarterPlayer").StarterPlayerScripts
+                    local localData = require(StarterScripts:WaitForChild("LocalData"))
+                    local data = localData:GetLocalData()
+                    
+                    if data and data.Bag then
+                        local CfgFind = require(RS.Tool.CfgFind)
+                        local EnumMgr = require(RS.Tool.EnumMgr)
+                        
+                        for _, entry in ipairs(data.Bag) do
+                            if entry.tp == EnumMgr.ItemType.Item and entry.count > 0 then
+                                local cfg = CfgFind.FindCfgByID(entry.id, entry.tp)
+                                if cfg and cfg.UseScript == "AddBUFF" then
+                                    local onlyID = entry.onlyID
+                                    for i = 1, entry.count do
+                                        pcall(function() RS.ServerMsg.UseItem:InvokeServer(onlyID) end)
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end)
+            end
+        end
+    end
+end
+
+-- Update time until rejoin display
 local function updateTimeDisplay()
-    local minutesInGame = math.floor(workspace.DistributedGameTime / 60)
-    timeLabel.Text = string.format("Time: %d/40 min", minutesInGame)
-    timeLabel.TextColor3 = minutesInGame >= 35 and Color3.fromRGB(0, 255, 0) or Color3.fromRGB(180, 180, 180)
+    -- Try to get rewards data, waiting until it exists
+    local readyCount, totalRewards, allReady, timeUntilLastReward
+    
+    -- Use task.spawn to prevent blocking the main thread
+    task.spawn(function()
+        -- Keep trying until we get valid data
+        while state.scriptActive do
+            readyCount, totalRewards, allReady, timeUntilLastReward = checkOnlineRewards()
+            
+            if allReady ~= nil then -- If we got valid data
+                break
+            end
+            
+            task.wait(1) -- Wait before trying again
+        end
+        
+        -- Only proceed if the script is still active
+        if not state.scriptActive then return end
+        
+        -- Update the display based on obtained data
+        if allReady then
+            timeUntilRejoinLabel.Text = "Rejoin in: Ready!"
+            timeUntilRejoinLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
+        elseif timeUntilLastReward then
+            timeUntilRejoinLabel.Text = "Rejoin in: " .. formatTime(timeUntilLastReward)
+            
+            if timeUntilLastReward <= 300 then -- Less than 5 minutes
+                timeUntilRejoinLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
+            else
+                timeUntilRejoinLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+            end
+        else
+            timeUntilRejoinLabel.Text = "Rejoin in: Loading..."
+            timeUntilRejoinLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+        end
+        
+        -- Claim any rewards that are ready, if data is available
+        if readyCount ~= nil then
+            claimClaimableRewards()
+        end
+    end)
 end
 
 -- Egg selection handling
@@ -503,77 +744,102 @@ local function claimDailyRewards()
     -- Claim daily tasks
     RS.Msg.RemoteEvent:FireServer("领取每日任务奖励")
     
-    -- Claim hourly rewards
-    for i = 1, 12 do
-        if i ~= 2 then -- Skip first pet
-            RS.Msg.RemoteEvent:FireServer("领取在线奖励", i)
-        end
-    end
-
+    -- Claim lottery spin
     for i = 1, 3 do
         RS.System.SystemDailyLottery.Spin:InvokeServer()
     end
     
-    task.wait(1)
-    
-    -- Use buff items
-    local StarterScripts = game:GetService("StarterPlayer").StarterPlayerScripts
-    local localData = require(StarterScripts:WaitForChild("LocalData"))
-    local data = localData:GetLocalData()
-    
-    if data and data.Bag then
-        local CfgFind = require(RS.Tool.CfgFind)
-        local EnumMgr = require(RS.Tool.EnumMgr)
-        
-        for _, entry in ipairs(data.Bag) do
-            if entry.tp == EnumMgr.ItemType.Item and entry.count > 0 then
-                local cfg = CfgFind.FindCfgByID(entry.id, entry.tp)
-                if cfg and cfg.UseScript == "AddBUFF" then
-                    local onlyID = entry.onlyID
-                    for i = 1, entry.count do
-                        pcall(function() RS.ServerMsg.UseItem:InvokeServer(onlyID) end)
-                    end
-                end
-            end
-        end
-    end
 end
 
--- Time monitoring for auto-rejoin
-local function startTimeMonitor()
-    if state.timeCheckRunning then return end
-    state.timeCheckRunning = true
+-- Rewards monitoring for auto-rejoin
+local function startRewardsMonitor()
+    if state.rewardsCheckRunning then return end
+    state.rewardsCheckRunning = true
 
     task.spawn(function()
         while state.scriptActive do
             updateTimeDisplay()
             
-            local currentGameTime = workspace.DistributedGameTime
-            if currentGameTime >= (40 * 60 + 10) then  -- Changed from 60*60+10 to 40*60+10 (40 minutes + 10 seconds)
+            -- Keep trying to check rewards status until valid data is received
+            local allReady = false
+            local dataObtained = false
+            
+            -- Keep trying until we get valid data
+            local checkingTask = task.spawn(function()
+                while state.scriptActive and not dataObtained do
+                    local readyCount, totalRewards, ready, timeUntilLastReward = checkOnlineRewards()
+                    
+                    if ready ~= nil then -- If we got valid data
+                        allReady = ready
+                        dataObtained = true
+                        break
+                    end
+                    
+                    task.wait(2) -- Wait before trying again
+                end
+            end)
+            
+            -- Wait for the checking task to complete
+            task.wait(10)
+            
+            -- If we have valid data and all rewards are ready
+            if dataObtained and allReady then
                 if state.autoRejoinEnabled and state.scriptActive then
-                    claimDailyRewards()
+                    -- Try to claim daily rewards
+                    pcall(claimDailyRewards)
                     saveSettings()
                     
+                    -- Queue script for after teleport
                     queue_on_teleport([[
                         loadstring(game:HttpGet("https://raw.githubusercontent.com/Maxhem2/RobloxScript/refs/heads/main/main.lua"))()
                     ]])
                     
+                    -- Teleport to same place
                     TS:Teleport(game.PlaceId, Player)
                 end
                 break
             end
             
-            task.wait(10)
             if not state.scriptActive then break end
         end
         
-        state.timeCheckRunning = false
+        state.rewardsCheckRunning = false
     end)
+end
+
+-- Save current player position
+local function savePlayerPosition()
+    local humanoidRootPart = Player.Character and Player.Character:FindFirstChild("HumanoidRootPart")
+    if not humanoidRootPart then return false end
+    
+    -- Save the current position with a small fixed height increase (5 studs)
+    -- This will place the player just slightly above their original position
+    state.savedPosition = humanoidRootPart.Position + Vector3.new(0, 5, 0)
+    
+    return true
 end
 
 -- Auto-rejoin toggle
 local function toggleAutoRejoin()
-    state.autoRejoinEnabled = not state.autoRejoinEnabled
+    if not state.autoRejoinEnabled then
+        -- Turning on auto-rejoin, save position
+        if savePlayerPosition() then
+            state.autoRejoinEnabled = true
+        else
+            -- Failed to save position
+            rejoinBtn.BackgroundColor3 = Color3.fromRGB(255, 100, 100)
+            task.delay(0.5, function() 
+                rejoinBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+            end)
+            return
+        end
+    else
+        -- Turning off auto-rejoin
+        state.autoRejoinEnabled = false
+        state.savedPosition = nil
+        state.savedHeight = 0
+    end
+    
     updateButtonStates()
     saveSettings()
 end
@@ -585,7 +851,7 @@ local function unloadGUI()
     state.running = false
     state.stopping = true
     state.scriptActive = false
-    state.timeCheckRunning = false
+    state.rewardsCheckRunning = false
     
     saveSettings()
     clearSelection()
@@ -694,7 +960,7 @@ end)
 
 -- Initialize
 updateButtonStates()
-startTimeMonitor()
+startRewardsMonitor()
 
 -- Auto-start features based on saved settings
 if state.lockedEggId then
