@@ -384,7 +384,7 @@ local function checkOnlineRewards()
     local readyCount = 0
     local allReady = false
     local totalRewards = 0
-    local timeUntilLastReward = 0
+    local timeUntilTargetReward = 0
     
     -- Find the last reward index
     local lastIndex = 0
@@ -394,7 +394,10 @@ local function checkOnlineRewards()
         end
     end
     
-    -- Calculate time until last reward and count rewards
+    -- Calculate target index (2 spots before the last reward, but at least index 1)
+    local targetIndex = math.max(1, lastIndex - 2)
+    
+    -- Calculate time until target reward and count rewards
     for index, config in pairs(onlineRewardsConf) do
         totalRewards = totalRewards + 1
         local requiredTime = config.OnlinTime * 60
@@ -412,16 +415,16 @@ local function checkOnlineRewards()
             readyCount = readyCount + 1
         end
         
-        -- If this is the last reward, track time until it's ready
-        if index == lastIndex then
-            timeUntilLastReward = timeLeft
+        -- If this is the target reward, track time until it's ready
+        if index == targetIndex then
+            timeUntilTargetReward = timeLeft
             if timeLeft <= 0 and not claimed then
                 allReady = true
             end
         end
     end
     
-    return readyCount, totalRewards, allReady, timeUntilLastReward
+    return readyCount, totalRewards, allReady, timeUntilTargetReward
 end
 
 -- Claim claimable rewards function
@@ -482,13 +485,13 @@ end
 -- Update time until rejoin display
 local function updateTimeDisplay()
     -- Try to get rewards data, waiting until it exists
-    local readyCount, totalRewards, allReady, timeUntilLastReward
+    local readyCount, totalRewards, allReady, timeUntilTargetReward
     
     -- Use task.spawn to prevent blocking the main thread
     task.spawn(function()
         -- Keep trying until we get valid data
         while state.scriptActive do
-            readyCount, totalRewards, allReady, timeUntilLastReward = checkOnlineRewards()
+            readyCount, totalRewards, allReady, timeUntilTargetReward = checkOnlineRewards()
             
             if allReady ~= nil then -- If we got valid data
                 break
@@ -504,10 +507,10 @@ local function updateTimeDisplay()
         if allReady then
             timeUntilRejoinLabel.Text = "Rejoin in: Ready!"
             timeUntilRejoinLabel.TextColor3 = Color3.fromRGB(0, 255, 0)
-        elseif timeUntilLastReward then
-            timeUntilRejoinLabel.Text = "Rejoin in: " .. formatTime(timeUntilLastReward)
+        elseif timeUntilTargetReward then
+            timeUntilRejoinLabel.Text = "Rejoin in: " .. formatTime(timeUntilTargetReward)
             
-            if timeUntilLastReward <= 300 then -- Less than 5 minutes
+            if timeUntilTargetReward <= 300 then -- Less than 5 minutes
                 timeUntilRejoinLabel.TextColor3 = Color3.fromRGB(255, 255, 0)
             else
                 timeUntilRejoinLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
@@ -767,7 +770,7 @@ local function startRewardsMonitor()
             -- Keep trying until we get valid data
             local checkingTask = task.spawn(function()
                 while state.scriptActive and not dataObtained do
-                    local readyCount, totalRewards, ready, timeUntilLastReward = checkOnlineRewards()
+                    local readyCount, totalRewards, ready, timeUntilTargetReward = checkOnlineRewards()
                     
                     if ready ~= nil then -- If we got valid data
                         allReady = ready
